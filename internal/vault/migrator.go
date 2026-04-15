@@ -1,90 +1,70 @@
 package vault
 
 import (
+	"context"
 	"fmt"
-	"strings"
 
-	"github.com/vaultshift/internal/audit"
+	"github.com/yourusername/vaultshift/internal/audit"
 )
 
-// MigrateOptions controls migration behaviour.
+// MigrateOptions controls the behaviour of a single secret migration.
 type MigrateOptions struct {
-	SourcePath string
-	DestPath   string
-	DryRun     bool
-	Recursive  bool
-}
-
-// MigrateResult summarises a completed migration.
-type MigrateResult struct {
-	Migrated []string
-	Skipped  []string
-	Errors   []string
+	DryRun   bool
+	Rollback bool // register writes with a Rollbacker when non-nil
 }
 
 // Migrator moves secrets from a source Vault client to a destination.
 type Migrator struct {
-	src    *Client
-	dst    *Client
-	logger *audit.Logger
+	src        *Client
+	dst        *Client
+	logger     *audit.Logger
+	rollbacker *Rollbacker
 }
 
-// NewMigrator creates a Migrator.
-func NewMigrator(src, dst *Client, logger *audit.Logger) *Migrator {
-	return &Migrator{src: src, dst: dst, logger: logger}
+// NewMigrator constructs a Migrator. Pass a non-nil Rollbacker to enable
+// automatic rollback registration on each successful write.
+func NewMigrator(src, dst *Client, l *audit.Logger, rb *Rollbacker) *Migrator {
+	return &Migrator{src: src, dst: dst, logger: l, rollbacker: rb}
 }
 
-// Migrate performs the migration according to the provided options.
-func (m *Migrator) Migrate(opts MigrateOptions) (*MigrateResult, error) {
-	result := &MigrateResult{}
-
-	paths, err := m.resolvePaths(opts)
+// Migrate reads the secret at srcPath from the source Vault and writes it to
+// dstPath on the destination Vault.
+func (m *Migrator) Migrate(ctx context.Context, srcMount, srcPath, dstMount, dstPath string, opts MigrateOptions) error {
+	data, err := m.src.ReadSecret(ctx, srcMount, srcPath)
 	if err != nil {
-		return nil, fmt.Errorf("resolving paths: %w", err)
+		m.logger.Log("read_error", map[string]interface{}{
+			"src_path": srcPath,
+			"error":    err.Error(),
+		})
+		return fmt.Errorf("read %s: %w", srcPath, err)
 	}
 
-	for _, path := range paths {
-		destPath := strings.Replace(path, opts.SourcePath, opts.DestPath, 1)
+	m.logger.Log("read_ok", map[string]interface{}{"src_path": srcPath})
 
-		data, err := m.src.ReadSecret(path)
-		if err != nil {
-			m.logger.Log("read_error", map[string]interface{}{"path": path, "error": err.Error()})
-			result.Errors = append(result.Errors, path)
-			continue
-		}
-
-		if opts.DryRun {
-			m.logger.Log("dry_run", map[string]interface{}{"src": path, "dst": destPath})
-			result.Skipped = append(result.Skipped, path)
-			continue
-		}
-
-		if err := m.dst.WriteSecret(destPath, data); err != nil {
-			m.logger.Log("write_error", map[string]interface{}{"path": destPath, "error": err.Error()})
-			result.Errors = append(result.Errors, path)
-			continue
-		}
-
-		m.logger.Log("migrated", map[string]interface{}{"src": path, "dst": destPath})
-		result.Migrated = append(result.Migrated, path)
+	if opts.DryRun {
+		m.logger.Log("dry_run_skip", map[string]interface{}{"dst_path": dstPath})
+		return nil
 	}
 
-	return result, nil
+	if err := m.dst.WriteSecret(ctx, dstMount, dstPath, data); err != nil {
+		m.logger.Log("write_error", map[string]interface{}{
+			"dst_path": dstPath,
+			"error":    err.Error(),
+		})
+		return fmt.Errorf("write %s: %w", dstPath, err)
+	}
+
+	m.logger.Log("write_ok", map[string]interface{}{"dst_path": dstPath})
+
+	if m.rollbacker != nil {
+		m.rollbacker.Record(dstMount, dstPath)
+	}
+	return nil
 }
 
-func (m *Migrator) resolvePaths(opts MigrateOptions) ([]string, error) {
-	if !opts.Recursive {
-		return []string{opts.SourcePath}, nil
-	}
-	keys, err := m.src.ListSecrets(opts.SourcePath)
-	if err != nil {
-		return nil, err
-	}
-	paths := make([]string, 0, len(keys))
-	for _, k := range keys {
-		if !strings.HasSuffix(k, "/") {
-			paths = append(paths, opts.SourcePath+"/"+k)
-		}
-	}
-	return paths, nil
+// Errors accumulates non-fatal migration errors across a batch run.
+type Errors []error
+
+func (e Errors) Error() string {
+	return fmt.Sprintf("%d migration error(s)", len(e))
 }
