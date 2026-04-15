@@ -1,0 +1,21 @@
+# vaultshift example configuration file
+# Copy to .vaultshift.yaml or pass via --config flag
+# All values can also be set via environment variables prefixed with VAULTSHIFT_
+# e.g. VAULTSHIFT_SOURCE_ADDR, VAULTSHIFT_DRY_RUN
+
+# Source Vault cluster
+source_addr: "https://vault-source.example.com:8200"
+source_token: "s.XXXXXXXXXXXXXXXXXXXX"  # or use VAULTSHIFT_SOURCE_TOKEN env var
+source_namespace: ""                    # optional: Vault Enterprise namespace
+
+# Destination Vault cluster
+dest_addr: "https://vault-dest.example.com:8200"
+dest_token: "s.YYYYYYYYYYYYYYYYYYYY"    # or use VAULTSHIFT_DEST_TOKEN env var
+dest_namespace: ""                      # optional: Vault Enterprise namespace
+
+# Migration behaviour
+dry_run: true                           # set to false to perform actual writes
+timeout: 30s                            # HTTP client timeout per request
+
+# Audit logging
+audit_log_path: "vaultshift-audit.log"  # path to write JSON audit events
