@@ -22,12 +22,14 @@ determine which paths to remove.`,
 func init() {
 	rollbackCmd.Flags().String("config", ".vaultshift.yaml", "path to config file")
 	rollbackCmd.Flags().String("audit-log", "", "path to audit log (defaults to stdout)")
+	rollbackCmd.Flags().Bool("dry-run", false, "print paths that would be deleted without deleting them")
 	RootCmd.AddCommand(rollbackCmd)
 }
 
 func runRollback(cmd *cobra.Command, _ []string) error {
 	cfgPath, _ := cmd.Flags().GetString("config")
 	auditPath, _ := cmd.Flags().GetString("audit-log")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -56,6 +58,10 @@ func runRollback(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
+	if dryRun {
+		return printDryRun(rb.Paths())
+	}
+
 	l.Log("rollback_start", map[string]interface{}{"count": rb.Len()})
 	errs := rb.Rollback(cmd.Context())
 	if len(errs) > 0 {
@@ -66,5 +72,15 @@ func runRollback(cmd *cobra.Command, _ []string) error {
 	}
 
 	fmt.Fprintf(os.Stdout, "rollback complete: %d secret(s) deleted\n", rb.Len())
+	return nil
+}
+
+// printDryRun lists the paths that would be deleted without performing any
+// deletions. Useful for verifying rollback scope before committing.
+func printDryRun(paths []string) error {
+	fmt.Fprintf(os.Stdout, "dry-run: %d path(s) would be deleted:\n", len(paths))
+	for _, p := range paths {
+		fmt.Fprintf(os.Stdout, "  - %s\n", p)
+	}
 	return nil
 }
