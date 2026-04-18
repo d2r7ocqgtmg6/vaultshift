@@ -3,6 +3,7 @@ package vault
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -32,7 +33,8 @@ func NewHistorian(client *Client, mount string) (*Historian, error) {
 	return &Historian{client: client, mount: mount}, nil
 }
 
-// ListVersions returns all version metadata for the secret at path.
+// ListVersions returns all version metadata for the secret at path,
+// sorted ascending by version number.
 func (h *Historian) ListVersions(ctx context.Context, path string) ([]HistoryEntry, error) {
 	metaPath := fmt.Sprintf("%s/metadata/%s", h.mount, path)
 	secret, err := h.client.vault.Logical().ReadWithContext(ctx, metaPath)
@@ -66,6 +68,11 @@ func (h *Historian) ListVersions(ctx context.Context, path string) ([]HistoryEnt
 		}
 		entries = append(entries, entry)
 	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Version < entries[j].Version
+	})
+
 	return entries, nil
 }
 
