@@ -45,6 +45,22 @@ func (e *Expirer) CheckAndPurge(paths []string) []ExpiryResult {
 	return results
 }
 
+// Summary returns counts of expired, active, and errored secrets from a slice
+// of ExpiryResults.
+func Summary(results []ExpiryResult) (expired, active, errored int) {
+	for _, r := range results {
+		switch {
+		case r.Error != nil:
+			errored++
+		case r.Expired:
+			expired++
+		default:
+			active++
+		}
+	}
+	return
+}
+
 func (e *Expirer) process(path string) ExpiryResult {
 	secret, err := e.client.ReadSecret(path)
 	if err != nil {
