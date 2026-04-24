@@ -27,6 +27,21 @@ func newImportMockServer(t *testing.T) *httptest.Server {
 	}))
 }
 
+// writeImportFile creates a temporary JSON file containing the given entries
+// and returns its path. The file is automatically cleaned up when the test ends.
+func writeImportFile(t *testing.T, entries []ImportEntry) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "import*.json")
+	if err != nil {
+		t.Fatalf("os.CreateTemp: %v", err)
+	}
+	if err := json.NewEncoder(f).Encode(entries); err != nil {
+		t.Fatalf("json.Encode: %v", err)
+	}
+	f.Close()
+	return f.Name()
+}
+
 func TestNewImporter_MissingClient(t *testing.T) {
 	l := newImportLogger(t)
 	_, err := NewImporter(nil, l, false)
@@ -46,11 +61,9 @@ func TestImport_DryRun_NoWrite(t *testing.T) {
 	entries := []ImportEntry{
 		{Path: "secret/foo", Data: map[string]interface{}{"key": "val"}},
 	}
-	f, _ := os.CreateTemp(t.TempDir(), "import*.json")
-	json.NewEncoder(f).Encode(entries)
-	f.Close()
+	path := writeImportFile(t, entries)
 
-	n, err := imp.Import(context.Background(), f.Name())
+	n, err := imp.Import(context.Background(), path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -77,11 +90,9 @@ func TestImport_WritesSecrets(t *testing.T) {
 		{Path: "secret/a", Data: map[string]interface{}{"x": "1"}},
 		{Path: "secret/b", Data: map[string]interface{}{"y": "2"}},
 	}
-	f, _ := os.CreateTemp(t.TempDir(), "import*.json")
-	json.NewEncoder(f).Encode(entries)
-	f.Close()
+	path := writeImportFile(t, entries)
 
-	n, err := imp.Import(context.Background(), f.Name())
+	n, err := imp.Import(context.Background(), path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
