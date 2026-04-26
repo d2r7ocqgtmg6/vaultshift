@@ -55,10 +55,10 @@ func (r *Redactor) Redact(path string, dryRun bool) error {
 
 	if r.logger != nil {
 		r.logger.Log(map[string]interface{}{
-			"action":   "redact",
-			"path":     path,
-			"keys":     strings.Join(redacted, ","),
-			"dry_run":  dryRun,
+			"action":  "redact",
+			"path":    path,
+			"keys":    strings.Join(redacted, ","),
+			"dry_run": dryRun,
 		})
 	}
 
@@ -66,5 +66,23 @@ func (r *Redactor) Redact(path string, dryRun bool) error {
 		return nil
 	}
 
-	return r.client.WriteSecret(path, map[string]interface{}{"data": data})
+	if err := r.client.WriteSecret(path, map[string]interface{}{"data": data}); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+// RedactBatch runs Redact over multiple paths, collecting all errors.
+// It continues processing remaining paths even if one fails.
+func (r *Redactor) RedactBatch(paths []string, dryRun bool) error {
+	var errs []string
+	for _, path := range paths {
+		if err := r.Redact(path, dryRun); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("redact batch errors: %s", strings.Join(errs, "; "))
+	}
+	return nil
 }
