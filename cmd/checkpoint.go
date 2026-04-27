@@ -11,8 +11,12 @@ import (
 var checkpointCmd = &cobra.Command{
 	Use:   "checkpoint <prefix> <output-file>",
 	Short: "Save a checkpoint of secrets under a prefix to a local file",
-	Args:  cobra.ExactArgs(2),
-	RunE:  runCheckpoint,
+	Long: `checkpoint reads all secrets under the given Vault prefix and writes
+them to a local file that can later be restored with the 'restore' command.
+
+Use --dry-run to preview the operation without writing any data to disk.`,
+	Args: cobra.ExactArgs(2),
+	RunE: runCheckpoint,
 }
 
 func init() {
