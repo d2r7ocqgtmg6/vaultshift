@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/subtlepseudonym/vaultshift/internal/audit"
+	"github.com/wearevault/vaultshift/internal/audit"
 )
 
 // DigestResult holds the computed digest for a single secret path.
@@ -16,15 +16,13 @@ type DigestResult struct {
 	Digest string `json:"digest"`
 }
 
-// Digester computes deterministic SHA-256 digests over secret data at given paths.
-// Digests are stable regardless of key insertion order, making them suitable for
-// change detection and integrity checks.
+// Digester computes deterministic SHA-256 digests for Vault secrets.
 type Digester struct {
 	client *Client
 	logger *audit.Logger
 }
 
-// NewDigester constructs a Digester. Both client and logger are required.
+// NewDigester creates a new Digester.
 func NewDigester(client *Client, logger *audit.Logger) (*Digester, error) {
 	if client == nil {
 		return nil, fmt.Errorf("client is required")
@@ -35,64 +33,53 @@ func NewDigester(client *Client, logger *audit.Logger) (*Digester, error) {
 	return &Digester{client: client, logger: logger}, nil
 }
 
-// Digest reads the secret at path and returns a DigestResult containing a
-// deterministic hex-encoded SHA-256 digest of the sorted key-value pairs.
-func (d *Digester) Digest(path string) (DigestResult, error) {
+// Digest reads the secret at path and returns its SHA-256 digest.
+func (d *Digester) Digest(path string) (*DigestResult, error) {
 	data, err := d.client.ReadSecret(path)
 	if err != nil {
 		d.logger.Log("digest", path, "error", err.Error())
-		return DigestResult{}, fmt.Errorf("read %s: %w", path, err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-
 	digest, err := computeDigest(data)
 	if err != nil {
-		d.logger.Log("digest", path, "error", err.Error())
-		return DigestResult{}, fmt.Errorf("compute digest for %s: %w", path, err)
+		return nil, fmt.Errorf("compute digest %s: %w", path, err)
 	}
-
-	result := DigestResult{Path: path, Digest: digest}
-	d.logger.Log("digest", path, "status", "ok", "digest", digest)
-	return result, nil
+	d.logger.Log("digest", path, "ok", digest)
+	return &DigestResult{Path: path, Digest: digest}, nil
 }
 
-// DigestAll computes digests for every path in paths and returns all results.
-// Errors for individual paths are recorded in the audit log but do not abort
-// processing of remaining paths.
-func (d *Digester) DigestAll(paths []string) ([]DigestResult, []error) {
-	results := make([]DigestResult, 0, len(paths))
-	var errs []error
-
+// DigestAll computes digests for all secrets under prefix.
+func (d *Digester) DigestAll(prefix string) ([]DigestResult, error) {
+	paths, err := listAllPaths(d.client, prefix)
+	if err != nil {
+		return nil, fmt.Errorf("list %s: %w", prefix, err)
+	}
+	var results []DigestResult
 	for _, p := range paths {
-		r, err := d.Digest(p)
+		res, err := d.Digest(p)
 		if err != nil {
-			errs = append(errs, err)
-			continue
+			return nil, err
 		}
-		results = append(results, r)
+		results = append(results, *res)
 	}
-
-	return results, errs
+	return results, nil
 }
 
-// computeDigest builds a deterministic digest from a map of secret key-value pairs.
-// Keys are sorted before hashing so that insertion order does not affect the result.
+// computeDigest produces a deterministic SHA-256 hex digest from a secret map.
 func computeDigest(data map[string]interface{}) (string, error) {
 	keys := make([]string, 0, len(data))
 	for k := range data {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-
-	h := sha256.New()
+	ordered := make(map[string]interface{}, len(data))
 	for _, k := range keys {
-		v := data[k]
-		encoded, err := json.Marshal(v)
-		if err != nil {
-			return "", fmt.Errorf("marshal value for key %q: %w", k, err)
-		}
-		// Write key=value\n into the hash for unambiguous separation.
-		_, _ = fmt.Fprintf(h, "%s=%s\n", k, encoded)
+		ordered[k] = data[k]
 	}
-
-	return hex.EncodeToString(h.Sum(nil)), nil
+	b, err := json.Marshal(ordered)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
 }
